@@ -1,20 +1,44 @@
 ﻿param (
 	[Parameter(Mandatory=$true)]
-	[ValidatePattern("^\d\.\d\.(?:\d\.\d$|\d$)")]
+	[ValidatePattern("^\d+\.\d+.\d+.\d+")]
 	[string]
 	$ReleaseVersionNumber
 )
 
+function Get-MSBuild-Path {
+    $vs14key = "HKLM:\SOFTWARE\Microsoft\MSBuild\ToolsVersions\14.0"
+    $vs15key = "HKLM:\SOFTWARE\wow6432node\Microsoft\VisualStudio\SxS\VS7"
+    $msbuildPath = ""
+
+    if (Test-Path $vs14key) {
+        $key = Get-ItemProperty $vs14key
+        $subkey = $key.MSBuildToolsPath
+        if ($subkey) {
+            $msbuildPath = Join-Path $subkey "msbuild.exe"
+        }
+    }
+
+    if (Test-Path $vs15key) {
+        $key = Get-ItemProperty $vs15key
+        $subkey = $key."15.0"
+        if ($subkey) {
+            $msbuildPath = Join-Path $subkey "MSBuild\15.0\bin\amd64\msbuild.exe"
+        }
+    }
+
+    return $msbuildPath
+}
+
 $PSScriptFilePath = Get-Item $MyInvocation.MyCommand.Path
 $RepoRoot = $PSScriptFilePath.Directory.Parent.FullName
 $NuGetFolder = Join-Path -Path $RepoRoot "packages"
-$SolutionPath = Join-Path -Path $RepoRoot -ChildPath "letsencrypt-win-simple.sln"
+$SolutionPath = Join-Path -Path $RepoRoot -ChildPath "win-acme.sln"
 $BuildFolder = Join-Path -Path $RepoRoot -ChildPath "build"
 $ProjectRoot = Join-Path -Path $RepoRoot "letsencrypt-win-simple"
 $TempFolder = Join-Path -Path $BuildFolder -ChildPath "temp"
 $Configuration = "Release"
 $ReleaseOutputFolder = Join-Path -Path $ProjectRoot -ChildPath "bin/$Configuration"
-$MSBuild = "${Env:ProgramFiles(x86)}\MSBuild\14.0\Bin\MsBuild.exe"
+$MSBuild = Get-MSBuild-Path;
 
 # Go get nuget.exe if we don't have it
 $NuGet = "$BuildFolder\nuget.exe"
@@ -28,17 +52,23 @@ If ($FileExists -eq $False) {
 cmd.exe /c "$NuGet restore $SolutionPath -NonInteractive -PackagesDirectory $NuGetFolder"
 
 # Set the version number in SolutionInfo.cs
-$NewVersion = 'AssemblyVersion("' + $ReleaseVersionNumber + '.*")'
-$NewFileVersion = 'AssemblyFileVersion("' + $ReleaseVersionNumber + '.0")'
+$versionParts = $ReleaseVersionNumber.Split(".")
+$NewVersion = 'AssemblyVersion("' + $versionParts[0] + $versionParts[1] + $versionParts[2] + '.' + $versionParts[3] + '.*")'
+$NewFileVersion = 'AssemblyFileVersion("' + $ReleaseVersionNumber + '")'
 
 $SolutionInfoPath = Join-Path -Path $ProjectRoot -ChildPath "Properties/AssemblyInfo.cs"
 (gc -Path $SolutionInfoPath) `
-	-replace 'AssemblyVersion\("[0-9]+(\.([0-9]+|\*)){1,3}"\)', $NewVersion |
+	-replace 'AssemblyVersion\("[0-9\.*]+"\)', $NewVersion |
 	sc -Path $SolutionInfoPath -Encoding UTF8
 (gc -Path $SolutionInfoPath) `
-	-replace 'AssemblyFileVersion\("[0-9]+(\.([0-9]+|\*)){1,3}"\)', "$NewFileVersion" |
+	-replace 'AssemblyFileVersion\("[0-9\.]+"\)', "$NewFileVersion" |
 	sc -Path $SolutionInfoPath -Encoding UTF8
-
+	
+$VersionTxtPath = Join-Path -Path $ProjectRoot -ChildPath "version.txt"
+(gc -Path $VersionTxtPath) `
+	-replace 'v[0-9\.]+', "v$ReleaseVersionNumber" |
+	sc -Path $VersionTxtPath -Encoding UTF8
+	
 # Build the solution in release mode
 
 # Clean solution
@@ -62,15 +92,16 @@ if (Test-Path $TempFolder)
 }
 New-Item $TempFolder -Type Directory
 
-$DestinationZipFile = "$BuildFolder\letsencrypt-win-simple.V$ReleaseVersionNumber.zip" 
+$DestinationZipFile = "$BuildFolder\win-acme.v$ReleaseVersionNumber.zip" 
 if (Test-Path $DestinationZipFile) 
 {
     Remove-Item $DestinationZipFile
 }
 
-Copy-Item (Join-Path -Path $ReleaseOutputFolder -ChildPath "x64") (Join-Path -Path $TempFolder -ChildPath "x64") -Recurse
-Copy-Item (Join-Path -Path $ReleaseOutputFolder -ChildPath "x86") (Join-Path -Path $TempFolder -ChildPath "x86") -Recurse
+Copy-Item (Join-Path -Path $ReleaseOutputFolder -ChildPath "scripts") (Join-Path -Path $TempFolder -ChildPath "scripts") -Recurse
 Copy-Item (Join-Path -Path $ReleaseOutputFolder "letsencrypt.exe") $TempFolder
+Copy-Item (Join-Path -Path $ReleaseOutputFolder "settings_default.config") $TempFolder
+Copy-Item (Join-Path -Path $ReleaseOutputFolder "version.txt") $TempFolder
 Copy-Item (Join-Path -Path $ReleaseOutputFolder "letsencrypt.exe.config") $TempFolder
 Copy-Item (Join-Path -Path $ReleaseOutputFolder "Web_Config.xml") $TempFolder
 

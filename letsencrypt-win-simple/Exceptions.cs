@@ -2,17 +2,17 @@
 using System;
 using System.Collections.Generic;
 
-namespace LetsEncrypt.ACME.Simple
+namespace PKISharp.WACS
 {
     public class AuthorizationFailedException : Exception
     {
-        public AuthorizationState authorizationState { get; private set; }
-        public IEnumerable<string> acmeErrorMessages { get; private set; }
+        public AuthorizationState AuthorizationState { get; private set; }
+        public IEnumerable<string> AcmeErrorMessages { get; private set; }
 
         public AuthorizationFailedException(AuthorizationState state, IEnumerable<string> acmeErrors)
         {
-            authorizationState = state;
-            acmeErrorMessages = acmeErrors;
+            AuthorizationState = state;
+            AcmeErrorMessages = acmeErrors;
         }
     }
 }
